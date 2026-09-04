@@ -1,0 +1,77 @@
+AHC Visual Intelligence Hackathon
+Real-Time Video Anomaly Detection
+AHC runs a one-day visual intelligence hackathon every two weeks. This one is about
+detecting anomalies in drone video, in real time.
+The problem
+Drones flying over a city cover highways, streets, parks, railway stations, bus terminals,
+public gatherings and utility sites, in daylight and at night. Most of what they record is
+routine, but a small proportion contains events that need a response.
+The aim is to detect those events while the drone is still overhead, so that someone can act
+on them, rather than finding them later in a review of the footage.
+Standard object detectors are not sufficient for this. Models such as YOLO identify the
+object classes they were trained on, but whether something counts as an anomaly depends
+on context rather than on the object itself. A stationary car is unremarkable in a parking
+bay and a problem on a highway shoulder. Classical computer vision methods run into the
+same limitation.
+Vision-language models are a better fit, because they are not tied to a fixed set of classes
+and can be queried in language, which makes it possible to describe an event in terms of its
+context and to cover situations that were not specified in advance. The difficulty is cost. The
+large models are too slow and too expensive to run continuously on live video, and
+inference has to stay cheap enough to run across a large number of drone feeds at once.
+The question this hackathon is built around is whether a small vision-language model
+can do this reliably in real time.
+Scope
+Some examples of the events of interest:
+Event
+1 Traffic congestion
+2 Vehicle breakdown, including vehicles stopped on a highway or parked where they
+should not be
+3 A vehicle blocking traffic
+4 Accidents
+5 Smoke and fire
+6 Water logging or Flood
+8 Loitering or Suspicious Presence
+9 Road spill or debris
+10 Fighting or Violence
+11 Wrong easy driving
+This is not a fixed list. Participants are welcome to cover other events that would matter to
+someone responding on the ground.
+Note that these do not all appear in video the same way. An accident is over in about a
+second, congestion builds gradually, a stopped vehicle only becomes an anomaly once it
+has been stationary for some time, and an open drain is a static condition rather than an
+event. False alarms also matter as much as missed detections, since an alerting system that
+fires regularly on ordinary activity stops being used.
+Constraints
+The system must run in real time on limited GPU capability, so that inference stays
+economical when it is running across many drones.
+Larger hosted models can be used during development, for comparison, or to generate
+training data, but they cannot be part of what makes the detector work at runtime.
+Beyond that, the approach is open. Any of the following are reasonable directions:
+● Fine-tuning a small vision-language model on footage of this kind
+● Distilling a larger model down
+● Pairing a lightweight always-on stage with a heavier verification step
+● Training something purpose-built
+● Implementing recent published work
+What is provided
+Unannotated drone footage over urban areas, including night flights, and public
+benchmark datasets downloaded in advance so that setup does not take up build time.
+There is enough footage to fine-tune on (Drone, CCTVs and Dashcams), Please Refer to the
+Dataset Doc shared with you.
+Who it is for
+● ML and computer vision engineers
+● Multimodal AI builders
+● Researchers and students working on video understanding, fine-tuning and distilling
+small vision-language models, efficient inference, anomaly detection or open-set
+recognition
+Participants should arrive with a coding setup and model access already tested, and with a
+training environment ready if they intend to fine-tune anything on the day.
+Schedule
+Time Session
+9:00 – 9:30 Breakfast and introductions
+9:30 – 11:00 Session on the current state of the art in video anomaly detection,
+along with related work in robotics and computer vision, and demos
+from the FlytBase team
+11:00 – 06:00 Build
+06:00 – 07:00 Selected demos and results
+Date: 05 September 2026
+Venue: FlytBase Labs or Online

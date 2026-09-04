@@ -1,0 +1,352 @@
+{
+  "schema_version": "1.0",
+  "submission_id": "my-team-run-01",
+  "model_name": "my-model",
+  "run_metadata": {
+    "total_wall_time_ms": 0,
+    "max_parallel_videos": 1,
+    "hardware": "describe your GPU here"
+  },
+  "predictions": [
+    {
+      "video_id": "T001",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T002",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T003",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T004",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T005",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T006",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T007",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T008",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T009",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T010",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T011",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T012",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T013",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T014",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T015",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T016",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T017",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T018",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T019",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T020",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T021",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T022",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T023",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T024",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T025",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T026",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T027",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T028",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T029",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T030",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T031",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T032",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T033",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "T034",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 0,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 0,
+        "model_runtimes": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,220 @@
+Submission Format
+AHC Video Anomaly Detection: everything you need to submit.
+What you do
+Sign in to the arena site with the Google account we registered for you. You can only see and submit for yourself.
+Benchmark tab → Submission format → download manifest.json. The list of videos you must answer for, and each one's level.
+Same panel → download starter template. Every video is pre-filled with empty answers. Start from this rather than typing JSON by hand.
+Run your model and fill in the template.
+Submit predictions → pick your file → Submit and score. You get your score straight away.
+Repeat as needed. Each upload re-scores everything you've answered so far, and replaces your previous score. There is no "best of", so a later run stands even if it scores lower.
+Fill in the Final submission section at the bottom of the page: code repo and architecture write-up. Required.
+Every upload is kept and listed under My Submissions, with the one that currently counts marked. The live leaderboard is on the big screen.
+If a file has a problem you get a table saying exactly which video and which field. A rejected file does not use up a run. Maximum file size 5 MB.
+
+
+
+You can submit in pieces
+A file only updates the videos it mentions. Your other answers stay exactly as they were.
+Note: E001, E002, … are video ids (video file names)
+
+
+You upload
+Your answers afterwards
+Run 1
+E001, E002
+E001 ✓ · E002 ✓
+Run 2
+E002, E003, E004
+E001 kept · E002 replaced · E003 ✓ · E004 ✓
+
+Re-answering a video replaces your old answer. Latest upload wins.
+Leaving a video out keeps your previous answer. It is not cleared.
+A video you never answer is scored as normal.
+So you can work through the pack as you go. Your page shows "Videos answered 12 of 28". Each upload costs one run regardless of how many videos it covers, so batch sensibly.
+Your score is always the score of your current answer sheet. Every upload recomputes it across all 28 videos and overwrites your previous score. Uploading a file that makes things worse will lower your standing. There is no fallback to an earlier, better run.
+
+
+
+
+
+
+
+The file
+{
+  "schema_version": "1.0",
+  "submission_id": "my-team-run-01",
+  "model_name": "my-near-real-time-vad",
+  "run_metadata": {
+    "total_wall_time_ms": 1476000,
+    "hardware": "1x RTX 4090"
+  },
+  "predictions": [
+    {
+      "video_id": "E001",
+      "events": [],
+      "runtime_metadata": {
+        "frames_processed": 90,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 4820,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "E009",
+      "events": [
+        {
+          "class_name": "fire",
+          "start_time_sec": null,
+          "end_time_sec": null,
+          "explanation": "Thick smoke rises from a burning structure."
+        }
+      ],
+      "runtime_metadata": {
+        "frames_processed": 30,
+        "chunks_processed": 1,
+        "end_to_end_internal_time_ms": 2100,
+        "model_runtimes": []
+      }
+    },
+    {
+      "video_id": "E021",
+      "events": [
+        { "class_name": "traffic_accident", "start_time_sec": 20, "end_time_sec": 40 },
+        { "class_name": "traffic_accident", "start_time_sec": 60, "end_time_sec": 80 }
+      ],
+      "runtime_metadata": {
+        "frames_processed": 600,
+        "chunks_processed": 24,
+        "end_to_end_internal_time_ms": 91000,
+        "model_runtimes": [
+          {
+            "model_name": "vision-language-model",
+            "call_count": 24,
+            "total_time_ms": 81900,
+            "average_time_ms": 3412.5,
+            "p50_time_ms": 3310.0,
+            "p95_time_ms": 4028.0,
+            "max_time_ms": 4605.0
+          }
+        ]
+      }
+    }
+  ]
+}
+
+
+E001 is called normal. E009 is a Level-1 event with no timestamps. E021 is a Level-2 video with two separate accidents.
+
+Field rules
+The only strictly required top-level field is predictions. The rest are recommended.
+Per video, all three of video_id, events and runtime_metadata are required. video_id must match the manifest exactly and appear once only.
+Per event
+Field
+Rule
+class_name
+One of the 11 classes below. 
+start_time_sec
+null at Level 1. Required and ≥ 0 at Levels 2 to 3
+end_time_sec
+null at Level 1. Must be greater than start
+explanation
+Optional, 20 to 500 characters. Bonus only. Omitting it never costs you
+
+runtime_metadata, required on every video
+Field
+Rule
+
+
+
+
+
+
+
+
+
+If a model_runtimes entry gives total_time_ms, call_count and average_time_ms, the average must match total ÷ calls within 2%. Any call_times_ms must have exactly call_count entries.
+Time from the start of processing that video until its event list is ready. Include decoding, preprocessing, inference and postprocessing. Exclude model loading and downloads.
+Unknown extra fields (confidence, bbox, debug keys) are ignored, not rejected.
+
+
+
+
+
+
+
+The 11 classes
+
+
+
+
+traffic_accident
+traffic_congestion
+stalled_or_broken_down_vehicle
+vehicle_blocking_traffic
+fire
+smoke
+waterlogging_or_flood
+wrong_way_driving
+road_spill_or_debris
+fighting_or_violence
+loitering_or_suspicious_presence
+normal
+
+
+
+
+
+
+
+
+The three levels are three different tasks
+Level
+Rows carry
+What you output
+1
+No timestamps
+One label for the whole clip
+2
+Timestamped intervals
+Every event, with start and end times
+3
+Timestamped intervals
+Same, on longer and harder footage
+
+At Level 1, repeating a class on one video earns nothing extra.
+At Levels 2 and 3, an event counts only when the class is right and temporal overlap reaches 0.5, where overlap is intersection ÷ union of the two intervals.
+In practice: if your interval sits inside the real event it must cover at least half of it. If it swallows the real event it must be no more than twice as long. Several partial fragments for one real event don't help. At most one can match, and the rest count against you.
+
+
+
+
+
+
+
+Scoring
+Level 1 is pooled across all Level-1 videos: half anomaly-versus-normal accuracy, half class accuracy.
+Levels 2 and 3 are scored per video, then averaged.
+Ground truth is normal → you predict nothing = 1, you predict anything = 0.
+Ground truth has events → a weighted mix of did you alert, matched events, and how well your timings line up. Timing weighs more at Level 3.
+All three are always shown separately, so a bonus can never disguise weak accuracy.
+Latency bonus: your total reported processing time ÷ total video duration.
+Final submission
+At the bottom of the Benchmark tab. Required, and separate from your score.
+Code repository: a URL a host can actually open.
+Architecture write-up: a link, or a PDF/HTML upload up to 25 MB. Show how your pipeline fits together: which models, in what order, what runs per frame versus per clip. A diagram beats prose.
+Notes: optional. Limitations, how to run it, what you'd do with more time.
+Editable as often as you like, and it doesn't use benchmark runs.
+
+
+
+
+Things that catch people out
+Sending "class_name": "normal" gets rejected. Use "events": [].
+Timestamps on Level-1 events get rejected. They must be null.
+Expecting an omitted video to be cleared. It isn't. Re-submit that video to change it.
+Many fragments for one event. Only the best-overlapping one can match.
+Predicting anything on a normal Level-2/3 video. That video scores zero. False alarms are expensive by design.
+Claiming the whole clip is anomalous. The 0.5 overlap gate puts this far below a real attempt.
+Forgetting runtime_metadata. It is required on every video, and it's where your latency bonus comes from.
+
+

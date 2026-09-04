@@ -1,0 +1,97 @@
+The task. Drone/CCTV/dashcam footage over a city. Detect 11 event types in real time on limited GPU. Large hosted models are allowed for development, generating training data, and comparison, but cannot be part of the runtime detector. The whole premise is: can a small VLM do this reliably.
+
+Three separate tasks, one submission file. 28 videos total, each tagged with a level in manifest.json.
+
+Level 1: one label for the whole clip, timestamps must be null.
+Levels 2–3: every event with start/end times. An event only counts if the class is right and temporal IoU ≥ 0.5. Level 3 is longer footage and weights timing more.
+
+How scoring punishes you — this is the part that decides rankings:
+
+On a normal Level-2/3 video, predicting nothing scores 1.0, predicting anything scores 0.0. One false alarm on a normal video costs a full video.
+Several partial fragments for one real event: at most one matches, the rest count against you.
+Claiming the whole clip is anomalous fails the 0.5 IoU gate.
+"class_name": "normal" is rejected. Use "events": [].
+runtime_metadata is required on every video and is where the latency bonus comes from.
+Latest upload wins, always. There is no best-of. A bad late run permanently replaces a good earlier one.
+explanation is 20–500 chars, bonus only, never penalised. Free points.
+Final submission (code repo URL + architecture write-up) is required and separate from your score.
+The decision
+
+Model: Qwen/Qwen3-VL-4B-Instruct.
+
+Not the 2B, not Qwen3.5-4B, not InternVL. Reasons: it has Text-Timestamp Alignment and Interleaved-MRoPE built specifically for video event localisation, which is exactly Levels 2–3; it runs at ~9 GB bf16 so it fits and serves fast on one 4090; and ms-swift, LLaMA-Factory and Unsloth all have day-one LoRA recipes for it, so nothing about the training path is exploratory. Qwen3.5-4B benchmarks better but has thinking mode on by default and a hybrid GDN+MoE architecture, and neither is something you want to be debugging with seven hours on the clock.
+
+Training method: LoRA SFT, single-token classification head, frozen vision tower.
+
+You don't fine-tune it to describe video. You fine-tune it to answer with one letter, A–L, for a short chunk of frames. Then at inference you read the top_logprobs of that single token and get a calibrated probability distribution over the 12 classes for free. This is the core trick and it buys you three things at once: one output token so inference is nearly all prefill, a confidence score you can threshold (impossible with free-text generation), and zero risk of format breakage mid-run.
+
+Architecture: overlapping 2s chunks of 8 frames at 448px long side → per-chunk class distribution → median smoothing → hysteresis to open/close events → same-class merge → per-class minimum duration → video-level gate. Explanations come from templates, not the model.
+
+The hysteresis and the merge step exist purely to beat the fragmentation penalty. The video-level gate exists purely to protect normal videos.
+
+Commands
+bash
+# env
+pip install "transformers>=4.57" "qwen_vl_utils>=0.0.14" "ms-swift>=4.0" "vllm>=0.11.0" opencv-python
+huggingface-cli download Qwen/Qwen3-VL-4B-Instruct --local-dir ./qwen3vl4b
+
+# data (labelled benchmarks first, they're free; teacher-label the drone footage second)
+python build_sft_data.py \
+  --labelled 'data/UCF-Crime/*/*.mp4' \
+  --unlabelled 'data/drone/*.mp4' \
+  --chunkdir ./chunks --out sft.jsonl --max_per_video 12
+
+# train: ~45-70 min for ~5k samples on one 4090
+MAX_PIXELS=200704 VIDEO_MAX_PIXELS=200704 \
+CUDA_VISIBLE_DEVICES=0 swift sft \
+  --model ./qwen3vl4b --tuner_type lora \
+  --dataset sft.jsonl \
+  --freeze_vit true --lora_rank 16 --lora_alpha 32 --target_modules all-linear \
+  --torch_dtype bfloat16 --num_train_epochs 2 \
+  --per_device_train_batch_size 1 --gradient_accumulation_steps 16 \
+  --learning_rate 1e-4 --warmup_ratio 0.05 \
+  --save_steps 200 --logging_steps 10 --output_dir out
+
+swift export --adapters out/vX-.../checkpoint-XXX --merge_lora true
+
+# serve
+vllm serve out/.../checkpoint-XXX-merged --served-model-name vad-qwen3vl-4b \
+  --max-model-len 8192 --limit-mm-per-prompt image=16 --dtype bfloat16
+
+# run
+python vad_pipeline.py --manifest manifest.json --videos ./videos --out sub.json
+
+Two things that will bite you: --freeze_vit true is not optional at 4B on a 4090, and use the torchcodec backend rather than decord if you touch video loading directly, since decord hangs during training on this model.
+
+Hour by hour
+
+Tonight, before you sleep. This matters more than anything you do tomorrow morning. Download the weights and the datasets. Start vLLM on the base model. Run vad_pipeline.py against the testing dashboard manifest with the unfinetuned model and get a valid submission accepted. Rejected files don't cost a run, so hammer the validator until it passes. You want tomorrow's first hour to be tuning, not plumbing.
+
+9:30–11:00 — SOTA session. Have data generation already running in the background.
+
+11:00–11:40 — Zero-shot run over all 28, submit. You now have a score on the board and a known-good file on disk. Do not overwrite it until validation says you've improved.
+
+11:40–13:00 — Finish sft.jsonl. Target 4–6k chunks, ~45% normal, and make the normal chunks hard: dense-but-moving traffic, cars legitimately parked in bays, night flights, wet roads, shadows. Everything else in the pipeline is downstream of how well the model says "A".
+
+13:00–14:15 — LoRA train. While it runs, hand-label 6–8 held-out videos yourself so you have something to tune thresholds against. Without this you're guessing.
+
+14:15–15:00 — Merge, serve, sweep t_high, t_video, t_open_chunks on your held-out set. Optimise for the real objective: mean score across event videos plus fraction of normal videos you stay silent on.
+
+15:00–15:30 — Submit v2.
+
+15:30–16:45 — Second pass. Widen stride at Level 3 if latency ratio is poor, tighten min_dur_sec for the slow classes (stalled vehicle, loitering, congestion), sanity-check that no video has more than 2–3 events.
+
+16:45–17:15 — Freeze predictions. Write the repo README and the architecture diagram. This is required and people forget it.
+
+17:15–18:00 — Buffer. Only submit again if validation says it's better.
+
+The checklist that actually protects your score
+Never submit an untuned run late in the day. Latest upload wins unconditionally.
+events: [] for normal, never class_name: "normal".
+null timestamps at Level 1, real ones at 2–3.
+runtime_metadata on every single video, and average_time_ms must equal total_time_ms ÷ call_count within 2%.
+Always fill explanation. Templates are fine, it's pure bonus.
+Batch your uploads. Each one costs a run regardless of how many videos it covers.
+Bias toward silence. A missed event loses part of one video. A false alarm loses all of one.
+
+The two scripts above are the pipeline and the data builder. The aggregation logic is tested and correctly drops isolated single-chunk spikes while merging a real six-chunk event into one interval. The tuning knobs are all in the CFG dict at the top of vad_pipeline.py.

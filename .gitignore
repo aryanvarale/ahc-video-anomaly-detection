@@ -1,0 +1,12 @@
+qwen3vl4b/
+data/
+data_mirrors/
+out/
+out_dryrun/
+chunks/
+chunks_dryrun/
+*.log
+__pycache__/
+*.pyc
+chunk_cache.json
+eval/
