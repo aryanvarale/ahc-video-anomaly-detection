@@ -33,12 +33,12 @@ CFG = {
     "long_side": 448,                             # frame resize, keeps tokens low
 
     # decision thresholds (tune on your val split - biggest score lever)
-    "t_high": 0.65,          # open an event
-    "t_low": 0.25,           # close an event
-    "t_open_chunks": 3,      # consecutive chunks above t_high needed to open
-    "t_video": 0.40,         # video-level gate: below this -> events: []
-    "t_level1": 0.30,        # L1: p(anomaly) needed to leave "normal"
-    "merge_gap_sec": 15.0,   # same-class runs closer than this are merged
+    "t_high": 0.60,          # open an event
+    "t_low": 0.40,           # close an event
+    "t_open_chunks": 2,      # consecutive chunks above t_high needed to open
+    "t_video": 0.65,         # video-level gate: below this -> events: []
+    "t_level1": 0.50,        # L1: p(anomaly) needed to leave "normal"
+    "merge_gap_sec": 2.0,    # same-class runs closer than this are merged
     "max_events": 4,         # fragmentation guard
     "min_dur_sec": {         # per-class minimum plausible duration
         "traffic_accident": 1.0,
