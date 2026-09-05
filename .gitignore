@@ -14,3 +14,6 @@ sft.jsonl
 chunk_cache*.json
 out2/
 out3/
+cache_*.json
+eval_vllm.log
+best_checkpoint_preds.json
