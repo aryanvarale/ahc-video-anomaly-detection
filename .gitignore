@@ -17,3 +17,10 @@ out3/
 cache_*.json
 eval_vllm.log
 best_checkpoint_preds.json
+chunks2/
+out4/
+sft_bal*.jsonl
+motion.json
+d1_dense*.json
+val_baseline_old.json
+val_tmp.json

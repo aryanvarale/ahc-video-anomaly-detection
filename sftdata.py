@@ -155,6 +155,12 @@ def main():
                      help="cap source videos per class before chunk-cutting, so a "
                           "class with 10x more raw videos doesn't dominate decode time")
     ap.add_argument("--normal_share", type=float, default=0.45)
+    ap.add_argument("--anom_target", type=int, default=0,
+                     help="chunks to aim for per ANOMALY class (0 = keep natural counts). "
+                          "The natural counts are ~8:1 between the commonest and rarest "
+                          "anomaly, which trains the model to fall back on the frequent "
+                          "class whenever it is unsure - the observed "
+                          "fighting->loitering and *->traffic_accident errors.")
     a = ap.parse_args()
 
     rows = []
@@ -171,26 +177,43 @@ def main():
     for cls, paths in by_class_paths.items():
         random.shuffle(paths)
         capped = paths[: a.max_videos_per_class]
-        print(f"[bench] {cls}: {len(paths)} found, using {len(capped)}")
+
+        # How densely to sample each video. Rare classes have both the fewest
+        # videos AND the shortest ones, so at the default 2s stride they can
+        # never reach the target however many videos we use; overlapping the
+        # chunks is the only lever left. Common classes stay at stride 2.0 and
+        # get their diversity from using more distinct videos instead.
+        stride, per_video = 2.0, a.max_per_video
+        if a.anom_target and cls != "normal":
+            need = a.anom_target / max(len(capped), 1)
+            if need > 6:
+                stride = 0.5
+            elif need > 3:
+                stride = 1.0
+            per_video = max(1, min(a.max_per_video, int(need * 2)))
+
+        print(f"[bench] {cls}: {len(paths)} found, using {len(capped)} "
+              f"(stride {stride}, <={per_video}/video)", flush=True)
         for path in capped:
-            ch = cut_chunks(path, outdir=a.chunkdir)
+            ch = cut_chunks(path, stride=stride, outdir=a.chunkdir)
             random.shuffle(ch)
-            for _, _, chpaths in ch[: a.max_per_video]:
-                rows.append((C2L[cls], chpaths))
+            for _, _, chpaths in ch[:per_video]:
+                # keep the source video so balancing can spread across videos
+                rows.append((C2L[cls], chpaths, path))
 
     # ---- source 2: unlabelled footage, distilled from a large VLM ----
     todo = []
     for path in glob.glob(a.unlabelled):
         ch = cut_chunks(path, outdir=a.chunkdir)
         random.shuffle(ch)
-        todo += ch[: a.max_per_video]
+        todo += [(c, path) for c in ch[: a.max_per_video]]
     print(f"[teacher] labelling {len(todo)} chunks with local {TEACHER_MODEL_PATH}")
     if todo:
         _load_teacher()  # load once, up front, before the loop
-        for i, item in enumerate(todo, 1):
+        for i, (item, src) in enumerate(todo, 1):
             lab = label_one(item)
             if lab:
-                rows.append((lab, item[2]))
+                rows.append((lab, item[2], src))
             if i % 50 == 0:
                 print(f"  {i}/{len(todo)}")
 
@@ -201,8 +224,33 @@ def main():
     # downsample the anomaly side proportionally instead of quietly accepting a
     # lower normal share.
     by = {}
-    for lab, paths in rows:
+    by_src = {}
+    for lab, paths, src in rows:
         by.setdefault(lab, []).append(paths)
+        by_src.setdefault(lab, {}).setdefault(src, []).append(paths)
+
+    # ---- equalise the anomaly classes ----
+    # Take the target round-robin over source videos rather than at random:
+    # drawing 650 chunks uniformly from a class whose chunks are concentrated in
+    # a few long videos would buy count without buying variety.
+    if a.anom_target:
+        for k in list(by):
+            if k == "A":
+                continue
+            groups = [v[:] for v in by_src[k].values()]
+            for g in groups:
+                random.shuffle(g)
+            random.shuffle(groups)
+            picked, i = [], 0
+            while len(picked) < a.anom_target and any(groups):
+                g = groups[i % len(groups)]
+                if g:
+                    picked.append(g.pop())
+                else:
+                    groups.pop(i % len(groups))
+                    continue
+                i += 1
+            by[k] = picked
 
     norm_pool = by.get("A", [])[:]
     random.shuffle(norm_pool)

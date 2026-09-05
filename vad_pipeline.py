@@ -27,14 +27,25 @@ CFG = {
     "model": "vad-qwen3vl-4b",
 
     # chunking
-    "chunk_sec": {1: None, 2: 2.0, 3: 3.0},      # None at L1 = whole clip
-    "stride_sec": {1: None, 2: 1.0, 3: 1.5},
+    # 2.0s windows everywhere because that is the geometry the LoRA was trained
+    # on; a 3.0s window at L3 asked the model about 1.5x more time than it ever
+    # saw in training. Measured on the held-out set: L3 0.079 -> 0.189, with 25%
+    # FEWER calls than the old 3.0s/1.5s, so latency improves as well.
+    "chunk_sec": {1: None, 2: 2.0, 3: 2.0},      # None at L1 = whole clip
+    "stride_sec": {1: None, 2: 1.0, 3: 2.0},
     "frames_per_chunk": {1: 16, 2: 8, 3: 8},
     "long_side": 448,                             # frame resize, keeps tokens low
 
     # decision thresholds (tune on your val split - biggest score lever)
-    "t_high": 0.75,          # open an event
-    "t_low": 0.40,           # close an event
+    # Training to ~100% token accuracy leaves the model overconfident: its
+    # per-chunk probabilities saturate at 0/1, so long stretches read as one
+    # undifferentiated block and event boundaries can't be cut from it (measured:
+    # with T=1 every threshold setting scored identically - thresholds were inert).
+    # Softening the distribution restores the dynamic range they act on.
+    "temperature": 2.5,      # 1.0 = off. Chosen mid-plateau (stable over 2.0-3.0)
+                             # rather than at the sharper single-point optimum.
+    "t_high": 0.65,          # open an event
+    "t_low": 0.30,           # close an event
     "t_open_chunks": 2,      # consecutive chunks above t_high needed to open
     "t_video": 0.65,         # video-level gate: below this -> events: []
     "t_level1": 0.50,        # L1: p(anomaly) needed to leave "normal"
@@ -324,7 +335,7 @@ def classify(imgs, retries=2):
             m = max(raw.values())
             ex = {k: math.exp(v - m) for k, v in raw.items()}
             z = sum(ex.values())
-            return {L2C[k]: v / z for k, v in ex.items()}
+            return apply_temperature({L2C[k]: v / z for k, v in ex.items()})
         except Exception:
             if attempt == retries:
                 return {"normal": 1.0}
@@ -410,6 +421,20 @@ EXPL = {
 # --------------------------------------------------------------------------- #
 # per-video driver
 # --------------------------------------------------------------------------- #
+def apply_temperature(probs, T=None):
+    """Soften a saturated class distribution: p^(1/T), renormalised.
+
+    T > 1 flattens. Applied to the already-normalised probabilities rather than
+    the raw logits, which is equivalent up to the constant that normalising
+    removes anyway."""
+    T = CFG["temperature"] if T is None else T
+    if not T or T == 1.0:
+        return probs
+    s = {k: max(v, 1e-12) ** (1.0 / T) for k, v in probs.items()}
+    z = sum(s.values()) or 1.0
+    return {k: v / z for k, v in s.items()}
+
+
 def _timed_classify(imgs):
     t = time.perf_counter()
     result = classify(imgs)

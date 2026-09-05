@@ -41,8 +41,20 @@ NVRTC = "/home/miniorange/.local/lib/python3.10/site-packages/nvidia/cu13/lib"
 
 
 def training_is_running():
+    """True only for an actual `python .../swift/cli/sft.py` process.
+
+    Shell wrappers that merely mention the path - a `pgrep`/`until` loop waiting
+    on training, or this script's own invocation - must not count, or the guard
+    matches itself and blocks a run that is perfectly safe."""
     out = subprocess.run(["ps", "-eo", "cmd"], capture_output=True, text=True).stdout
-    return any("swift/cli/sft.py" in ln for ln in out.splitlines())
+    for ln in out.splitlines():
+        if "swift/cli/sft.py" not in ln:
+            continue
+        if any(tok in ln for tok in ("pgrep", "grep ", "until ", "eval_checkpoints", "/bin/bash")):
+            continue
+        if "python" in ln:
+            return True
+    return False
 
 
 def sh(cmd, **kw):
@@ -139,6 +151,26 @@ def build_preds(cache):
     return preds
 
 
+def val_accuracy(val_path, limit):
+    """Per-class accuracy on held-out *videos*.
+
+    The 34-video arena-style set is too small to separate two checkpoints (4 of
+    them are level 3), so the checkpoint decision leans on this instead: ~1000
+    chunks from videos no training step saw."""
+    out = ROOT / "val_tmp.json"
+    r = subprocess.run(
+        [sys.executable, "eval_val.py", "--val", val_path, "--limit", str(limit),
+         "--out", str(out)],
+        cwd=ROOT, capture_output=True, text=True,
+        env={**os.environ, "VAD_SERVER": f"http://127.0.0.1:{PORT}/v1/chat/completions"})
+    if not out.exists():
+        print("    val eval failed:", r.stdout[-400:], r.stderr[-400:])
+        return None
+    d = json.load(open(out))
+    out.unlink(missing_ok=True)
+    return d
+
+
 def evaluate(name, merged, keep_cache):
     cache_path = ROOT / f"cache_{name}.json"
     if not cache_path.exists():
@@ -162,7 +194,7 @@ def evaluate(name, merged, keep_cache):
     s1 = r1["score"] if r1 else 0.0
     s2 = r2["mean_score"] if r2 else 0.0
     s3 = r3["mean_score"] if r3 else 0.0
-    return {"name": name, "L1": s1, "L2": s2, "L3": s3,
+    return {"name": name, "L1": s1, "L2": s2, "L3": s3, "val": None,
             # weighted the way the arena splits its marks (25 / 35 / 40)
             "weighted": 0.25 * s1 + 0.35 * s2 + 0.40 * s3,
             "precision": ev["precision"], "recall": ev["recall"], "f1": ev["f1"],
@@ -177,6 +209,8 @@ def main():
     ap.add_argument("--run-dir", default="out3")
     ap.add_argument("--keep", action="store_true", help="keep merged weights + caches")
     ap.add_argument("--force", action="store_true", help="run even while training")
+    ap.add_argument("--val", default="", help="held-out SFT jsonl for per-class accuracy")
+    ap.add_argument("--val_limit", type=int, default=1100)
     a = ap.parse_args()
 
     if training_is_running() and not a.force:
@@ -203,10 +237,18 @@ def main():
             merged = merge(ckpt)
             proc = serve(merged)
             res = evaluate(name, merged, a.keep)
+            if a.val:
+                res["val"] = val_accuracy(a.val, a.val_limit)
             results.append(res)
             print(f"    L1 {res['L1']:.3f}  L2 {res['L2']:.3f}  L3 {res['L3']:.3f}"
                   f"   P {res['precision']*100:.1f}%  R {res['recall']*100:.1f}%"
-                  f"  F1 {res['f1']*100:.1f}%  FP {res['fp']}\n")
+                  f"  F1 {res['f1']*100:.1f}%  FP {res['fp']}")
+            if res["val"]:
+                pc = res["val"]["per_class"]
+                worst = sorted(pc.items(), key=lambda x: x[1])[:4]
+                print(f"    val {res['val']['overall']*100:.1f}%  weakest: "
+                      + ", ".join(f"{k} {v*100:.0f}%" for k, v in worst))
+            print()
         except Exception as exc:                                  # noqa: BLE001
             print(f"    FAILED: {exc}\n")
         finally:
@@ -218,12 +260,13 @@ def main():
         sys.exit("nothing evaluated successfully")
 
     print("=" * 78)
-    print(f"{'checkpoint':<26}{'L1':>7}{'L2':>7}{'L3':>7}{'wtd':>8}{'prec':>8}{'rec':>7}{'FP':>5}")
-    print("-" * 78)
+    print(f"{'checkpoint':<26}{'L1':>7}{'L2':>7}{'L3':>7}{'wtd':>8}{'prec':>8}{'rec':>7}{'FP':>5}{'val':>7}")
+    print("-" * 85)
     for r in sorted(results, key=lambda x: -x["weighted"]):
+        v = f"{r['val']['overall']*100:>6.1f}%" if r.get("val") else "     -"
         print(f"{r['name']:<26}{r['L1']:>7.3f}{r['L2']:>7.3f}{r['L3']:>7.3f}"
-              f"{r['weighted']:>8.3f}{r['precision']*100:>7.1f}%{r['recall']*100:>6.1f}%{r['fp']:>5}")
-    print("=" * 78)
+              f"{r['weighted']:>8.3f}{r['precision']*100:>7.1f}%{r['recall']*100:>6.1f}%{r['fp']:>5}{v}")
+    print("=" * 85)
 
     best = max(results, key=lambda x: x["weighted"])
     print(f"\nbest by weighted score: {best['name']}")
