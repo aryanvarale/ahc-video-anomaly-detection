@@ -33,7 +33,7 @@ CFG = {
     "long_side": 448,                             # frame resize, keeps tokens low
 
     # decision thresholds (tune on your val split - biggest score lever)
-    "t_high": 0.60,          # open an event
+    "t_high": 0.75,          # open an event
     "t_low": 0.40,           # close an event
     "t_open_chunks": 2,      # consecutive chunks above t_high needed to open
     "t_video": 0.65,         # video-level gate: below this -> events: []
