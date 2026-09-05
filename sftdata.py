@@ -145,26 +145,38 @@ def resolve_class(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--unlabelled", default="", help="glob of drone/CCTV videos")
-    ap.add_argument("--labelled", default="",
-                     help="glob like 'Train and Test/train/*/videos/*.mp4' or 'UCF/*/*.mp4'")
+    ap.add_argument("--labelled", default=[], action="append",
+                     help="glob like 'Train and Test/train/*/videos/*.mp4' or 'UCF/*/*.mp4'; "
+                          "pass multiple times to combine several sources into one balanced set")
     ap.add_argument("--chunkdir", default="chunks")
     ap.add_argument("--out", default="sft.jsonl")
     ap.add_argument("--max_per_video", type=int, default=12)
+    ap.add_argument("--max_videos_per_class", type=int, default=100,
+                     help="cap source videos per class before chunk-cutting, so a "
+                          "class with 10x more raw videos doesn't dominate decode time")
     ap.add_argument("--normal_share", type=float, default=0.45)
     a = ap.parse_args()
 
     rows = []
 
     # ---- source 1: labelled benchmarks (no teacher calls needed) ----
-    for path in glob.glob(a.labelled):
-        cls = resolve_class(path)
-        if not cls:
-            continue
-        ch = cut_chunks(path, outdir=a.chunkdir)
-        random.shuffle(ch)
-        for _, _, paths in ch[: a.max_per_video]:
-            rows.append((C2L[cls], paths))
-        print(f"[bench] {os.path.basename(path)} -> {cls} ({min(len(ch), a.max_per_video)})")
+    by_class_paths = {}
+    for pattern in a.labelled:
+        for path in glob.glob(pattern):
+            cls = resolve_class(path)
+            if not cls:
+                continue
+            by_class_paths.setdefault(cls, []).append(path)
+
+    for cls, paths in by_class_paths.items():
+        random.shuffle(paths)
+        capped = paths[: a.max_videos_per_class]
+        print(f"[bench] {cls}: {len(paths)} found, using {len(capped)}")
+        for path in capped:
+            ch = cut_chunks(path, outdir=a.chunkdir)
+            random.shuffle(ch)
+            for _, _, chpaths in ch[: a.max_per_video]:
+                rows.append((C2L[cls], chpaths))
 
     # ---- source 2: unlabelled footage, distilled from a large VLM ----
     todo = []
