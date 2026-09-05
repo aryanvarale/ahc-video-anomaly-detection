@@ -32,9 +32,15 @@ CFG = {
     # the shipped v4 configuration it is a regression - 3.0s scores 0.216, 2.0s
     # scores 0.189 - so L3 stays at 3.0s. Worth retrying against a retrained model,
     # but only with the baseline re-measured, not read off an old cache.
-    "chunk_sec": {1: None, 2: 2.0, 3: 3.0},      # None at L1 = whole clip
-    "stride_sec": {1: None, 2: 1.0, 3: 1.5},
-    "frames_per_chunk": {1: 16, 2: 8, 3: 8},
+    # Level 1 chunks densely (2s/1s) rather than taking one whole-clip pass. A
+    # single pass has to compress a 26s clip into 16 frames, and a brief anomaly
+    # gets averaged away; 2s windows also match the geometry the LoRA trained on.
+    # Measured on the held-out set, this took level 1 from 5/20 to 12/20 correct,
+    # and it is the configuration the shipped submission was built with - so it
+    # is the default here, or running this file would not reproduce that score.
+    "chunk_sec": {1: 2.0, 2: 2.0, 3: 3.0},
+    "stride_sec": {1: 1.0, 2: 1.0, 3: 1.5},
+    "frames_per_chunk": {1: 8, 2: 8, 3: 8},
     "long_side": 448,                             # frame resize, keeps tokens low
 
     # decision thresholds (tune on your val split - biggest score lever)
@@ -49,7 +55,13 @@ CFG = {
     "t_low": 0.30,           # close an event
     "t_open_chunks": 2,      # consecutive chunks above t_high needed to open
     "t_video": 0.65,         # video-level gate: below this -> events: []
-    "t_level1": 0.50,        # L1: p(anomaly) needed to leave "normal"
+    # L1: p(anomaly) needed to leave "normal".
+    # Swept on the held-out level-1 videos: 0.15-0.40 all score 0.708, 0.45-0.50
+    # score 0.750, 0.60 drops to 0.729. The step at 0.45 is T003, a normal video
+    # sitting at p_anom 0.42 - below 0.45 it becomes a false alarm, which at level
+    # 1 costs BOTH halves of the score (anomaly-vs-normal and class). 0.50 is the
+    # middle of the good plateau rather than its edge.
+    "t_level1": 0.50,
     "merge_gap_sec": 2.0,    # same-class runs closer than this are merged
     "max_events": 4,         # fragmentation guard
 
