@@ -12,3 +12,5 @@ chunk_cache.json
 eval/
 sft.jsonl
 chunk_cache*.json
+out2/
+out3/

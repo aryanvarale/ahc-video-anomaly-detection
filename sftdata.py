@@ -195,16 +195,41 @@ def main():
                 print(f"  {i}/{len(todo)}")
 
     # ---- balance ----
+    # normal_share is a target, not just a normal-side cap: if there isn't enough
+    # normal supply to hit it against the full anomaly pool (false alarms are the
+    # costliest failure mode, so under-shooting this silently is dangerous),
+    # downsample the anomaly side proportionally instead of quietly accepting a
+    # lower normal share.
     by = {}
     for lab, paths in rows:
         by.setdefault(lab, []).append(paths)
-    n_anom = sum(len(v) for k, v in by.items() if k != "A")
-    keep_norm = int(n_anom * a.normal_share / max(1 - a.normal_share, 1e-6))
-    random.shuffle(by.get("A", []))
-    final = [("A", p) for p in by.get("A", [])[:keep_norm]]
-    for k, v in by.items():
-        if k != "A":
-            final += [(k, p) for p in v]
+
+    norm_pool = by.get("A", [])[:]
+    random.shuffle(norm_pool)
+    anom_labels = [k for k in by if k != "A"]
+    n_anom_total = sum(len(by[k]) for k in anom_labels)
+    n_norm_avail = len(norm_pool)
+
+    keep_norm = int(n_anom_total * a.normal_share / max(1 - a.normal_share, 1e-6))
+    if n_norm_avail >= keep_norm:
+        final_norm = norm_pool[:keep_norm]
+        final_anom_by_class = {k: by[k] for k in anom_labels}
+    else:
+        max_anom_total = int(n_norm_avail * (1 - a.normal_share) / max(a.normal_share, 1e-6))
+        final_norm = norm_pool
+        final_anom_by_class = {}
+        if 0 < max_anom_total < n_anom_total:
+            frac = max_anom_total / n_anom_total
+            for k in anom_labels:
+                v = by[k][:]
+                random.shuffle(v)
+                final_anom_by_class[k] = v[: max(1, round(len(v) * frac))]
+        else:
+            final_anom_by_class = {k: by[k] for k in anom_labels}
+
+    final = [("A", p) for p in final_norm]
+    for k, v in final_anom_by_class.items():
+        final += [(k, p) for p in v]
     random.shuffle(final)
 
     with open(a.out, "w") as f:
