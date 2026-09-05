@@ -40,6 +40,27 @@ CFG = {
     "t_level1": 0.50,        # L1: p(anomaly) needed to leave "normal"
     "merge_gap_sec": 2.0,    # same-class runs closer than this are merged
     "max_events": 4,         # fragmentation guard
+
+    # --- stage 2: tiled verification (off by default) ------------------------
+    # The always-on pass sees the whole frame downscaled to `long_side`, so an
+    # anomaly occupying a small corner of a wide aerial shot can collapse into a
+    # couple of patches and vanish. This second stage re-reads those frames at
+    # full resolution, splits them into a grid, and classifies each tile, giving
+    # a small region grid^2 times the pixel density it had in the full frame.
+    # It only fires on a minority of chunks, so the real-time budget holds.
+    "verify_enabled": False,
+    "verify_band": (0.20, 0.80),   # first-pass p(anomaly) in this band -> uncertain, verify
+    "verify_every_n": 6,           # ALSO verify every Nth chunk regardless of confidence:
+                                   # a small anomaly the low-res pass confidently calls
+                                   # "normal" never lands in the uncertain band, and the
+                                   # classes most likely to be small (debris, loitering,
+                                   # stalled vehicle) are also the most persistent, so
+                                   # periodic sampling has a good chance of catching them.
+    "verify_grid": 2,              # 2x2 tiling
+    "verify_max_calls": 60,        # hard per-video cap on extra model calls
+    "verify_tile_min_conf": 0.90,  # tiles are out-of-distribution vs the full-frame
+                                   # training data, so demand high confidence before a
+                                   # tile is allowed to override the full-frame verdict
     "min_dur_sec": {         # per-class minimum plausible duration
         "traffic_accident": 1.0,
         "traffic_congestion": 4.0,
@@ -159,6 +180,118 @@ def read_chunks(path, level):
             out.append((a, b, imgs))
             used += len(imgs)
     return out, dur, used
+
+
+# --------------------------------------------------------------------------- #
+# stage 2: tiled verification
+# --------------------------------------------------------------------------- #
+def read_frames_raw(path, start_sec, end_sec, k):
+    """Re-read this chunk's k frames at FULL resolution.
+
+    read_chunks() throws the raw frames away (it encodes straight to downscaled
+    jpeg) and holding them all would cost gigabytes on a long clip, so the
+    verification stage pays a second seek+decode for the chunks it actually
+    looks at."""
+    cap = cv2.VideoCapture(path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    nframes = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    out = []
+    for j in range(k):
+        t = start_sec + (end_sec - start_sec) * (j + 0.5) / k
+        idx = min(max(int(round(t * fps)), 0), max(nframes - 1, 0))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ok, frame = cap.read()
+        if ok:
+            out.append(frame)
+    cap.release()
+    return out
+
+
+def tile_frame(frame, grid):
+    """Split into grid x grid tiles -> [((row, col), tile), ...].
+    The last row/column absorbs any remainder so no pixels are dropped."""
+    h, w = frame.shape[:2]
+    th, tw = h // grid, w // grid
+    if th < 1 or tw < 1:
+        return [((0, 0), frame)]
+    tiles = []
+    for r in range(grid):
+        for c in range(grid):
+            y0, x0 = r * th, c * tw
+            y1 = h if r == grid - 1 else (r + 1) * th
+            x1 = w if c == grid - 1 else (c + 1) * tw
+            tiles.append(((r, c), frame[y0:y1, x0:x1]))
+    return tiles
+
+
+def verify_chunk(path, start_sec, end_sec, k, classify_fn=None):
+    """Classify each tile position of this chunk separately.
+
+    Tiles are grouped BY POSITION across the chunk's frames, so every model call
+    still sees a short temporal sequence of one region rather than a single
+    still - that keeps the input shaped like what the model was trained on.
+
+    Returns (best_probs, call_times_ms). best_probs is the tile distribution
+    with the strongest anomaly signal, or None if nothing could be read."""
+    classify_fn = classify_fn or classify
+    frames = read_frames_raw(path, start_sec, end_sec, k)
+    if not frames:
+        return None, []
+
+    by_pos = {}
+    for fr in frames:
+        for pos, tile in tile_frame(fr, CFG["verify_grid"]):
+            by_pos.setdefault(pos, []).append(tile)
+
+    best, times = None, []
+    for _, tiles in sorted(by_pos.items()):
+        imgs = [x for x in (encode(t, CFG["long_side"]) for t in tiles) if x]
+        if not imgs:
+            continue
+        t0 = time.perf_counter()
+        probs = classify_fn(imgs)
+        times.append((time.perf_counter() - t0) * 1000.0)
+        if probs and (best is None or
+                      1.0 - probs.get("normal", 0.0) > 1.0 - best.get("normal", 0.0)):
+            best = probs
+    return best, times
+
+
+def wants_verify(p_anom, chunk_idx):
+    lo, hi = CFG["verify_band"]
+    if lo < p_anom < hi:
+        return True
+    n = CFG["verify_every_n"]
+    return bool(n) and chunk_idx % n == 0
+
+
+def apply_verification(path, chunks, probs, level):
+    """Run stage 2 over the chunks that warrant it and fold the results in.
+
+    Returns (probs, extra_call_times_ms). probs is modified in place-ish (a new
+    list is returned) - a tile only overrides the full-frame verdict when it is
+    both more anomalous AND above verify_tile_min_conf, because a cropped tile is
+    out-of-distribution relative to the full-frame chunks the model was tuned on
+    and its confidence is correspondingly less trustworthy."""
+    k = CFG["frames_per_chunk"][level]
+    out = list(probs)
+    extra_times, budget = [], CFG["verify_max_calls"]
+
+    for i, (a, b, _) in enumerate(chunks):
+        if budget <= 0:
+            break
+        full_anom = 1.0 - out[i].get("normal", 0.0)
+        if not wants_verify(full_anom, i):
+            continue
+        tile_probs, times = verify_chunk(path, a, b, k)
+        extra_times += times
+        budget -= max(len(times), 1)
+        if not tile_probs:
+            continue
+        tile_anom = 1.0 - tile_probs.get("normal", 0.0)
+        if tile_anom > full_anom and tile_anom >= CFG["verify_tile_min_conf"]:
+            out[i] = tile_probs
+    return out, extra_times
 
 
 # --------------------------------------------------------------------------- #
@@ -298,7 +431,14 @@ def do_video(vid, path, level, pool):
     chunks, dur, nframes = read_chunks(path, level)
     timed = list(pool.map(lambda c: _timed_classify(c[2]), chunks))
     calls = [r for r, _ in timed]
-    call_times = sorted(t for _, t in timed)
+    call_times = [t for _, t in timed]
+
+    if CFG["verify_enabled"] and chunks:
+        calls, extra_times = apply_verification(path, chunks, calls, level)
+        call_times += extra_times   # verification is real work; it must show up
+                                    # in call_count/total_time_ms, since the
+                                    # latency bonus is computed from what we report
+    call_times.sort()
 
     if level == 1:
         agg = {}
