@@ -36,6 +36,15 @@ UPLOADS = APP_DIR / "uploads"
 UPLOADS.mkdir(exist_ok=True)
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+# Codecs a browser will actually decode in a <video> tag. OpenCV happily reads
+# far more than this - an MPEG-4 Part 2 file (fourcc FMP4, what most "export as
+# mp4" tools still emit) analyses fine and then plays as a black rectangle,
+# which looks like a broken app rather than an unsupported codec. Anything
+# outside this set gets re-encoded to WebM before it is offered for playback.
+BROWSER_CODECS = {"avc1", "h264", "H264", "x264", "vp08", "vp09", "vp80",
+                  "vp90", "av01", "mp41", "mp42", "isom", "hvc1"}
+PLAYABLE_W = 960        # transcode cap; playback only, analysis uses the original
 THUMB_W = 220           # preview strip sent with each chunk verdict
 MAX_UPLOAD_MB = 500
 
@@ -209,8 +218,112 @@ async def upload(file: UploadFile = File(...)):
             fh.write(buf)
 
     JOBS[job_id] = {"path": dest, "kind": kind, "queue": queue.Queue(),
-                    "started": False}
-    return {"job_id": job_id, "kind": kind, "name": file.filename, "bytes": size}
+                    "started": False, "playback": None, "transcoding": False,
+                    "name": file.filename or ""}
+
+    codec = ""
+    if kind == "video":
+        try:
+            codec = fourcc_of(dest)
+        except Exception:
+            codec = ""
+        JOBS[job_id]["codec"] = codec
+        # off the request thread: a long clip takes a while to re-encode and the
+        # UI wants the job id back immediately so it can start the analysis
+        threading.Thread(target=prepare_playback, args=(job_id,), daemon=True).start()
+
+    return {"job_id": job_id, "kind": kind, "name": file.filename, "bytes": size,
+            "codec": codec, "needs_transcode": bool(codec) and codec not in BROWSER_CODECS,
+            "ground_truth": ground_truth_for(file.filename or "")}
+
+
+GT_CSV = APP_DIR.parent / "data" / "Train and Test" / "test" / "ground_truth.csv"
+_GT_CACHE = None
+
+
+def ground_truth_for(filename):
+    """Labelled intervals for a video from the held-out set, if this is one.
+
+    IoU is the gate the whole task is scored on - an event only counts when it
+    overlaps the truth by half - so when the dropped file happens to be one of
+    the labelled videos, the demo can show that number live against the clock
+    instead of asking anyone to take the detection on trust. An uploaded clip
+    has no truth to compare against and simply gets none."""
+    global _GT_CACHE
+    if _GT_CACHE is None:
+        _GT_CACHE = {}
+        try:
+            import csv
+            with open(GT_CSV) as fh:
+                for row in csv.DictReader(fh):
+                    if row["is_anomaly"].strip().lower() != "true":
+                        continue
+                    if not row["start_time_sec"] or not row["end_time_sec"]:
+                        continue
+                    _GT_CACHE.setdefault(row["video_id"], []).append({
+                        "class_name": row["class_name"],
+                        "start": float(row["start_time_sec"]),
+                        "end": float(row["end_time_sec"]),
+                    })
+        except Exception:
+            _GT_CACHE = {}
+    return _GT_CACHE.get(Path(filename).stem.upper(), [])
+
+
+def fourcc_of(path):
+    cap = cv2.VideoCapture(str(path))
+    raw = int(cap.get(cv2.CAP_PROP_FOURCC))
+    cap.release()
+    return "".join(chr((raw >> 8 * i) & 0xFF) for i in range(4)).strip()
+
+
+def make_playable(job_id, src):
+    """Re-encode to WebM so the browser can actually show it.
+
+    Only the playback copy is converted; every model call still reads the
+    original file, so nothing about the analysis changes. VP8 rather than VP9
+    because this is on the path between dropping a file and seeing it move, and
+    VP8 encodes several times faster at a quality that does not matter for a
+    preview."""
+    dst = UPLOADS / f"{job_id}_play.webm"
+    cap = cv2.VideoCapture(str(src))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    if not w or not h:
+        cap.release()
+        return None
+    scale = min(1.0, PLAYABLE_W / w)
+    ow, oh = int(w * scale) // 2 * 2, int(h * scale) // 2 * 2
+    out = cv2.VideoWriter(str(dst), cv2.VideoWriter_fourcc(*"VP80"), fps, (ow, oh))
+    if not out.isOpened():
+        cap.release()
+        return None
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        out.write(cv2.resize(frame, (ow, oh)) if scale < 1.0 else frame)
+    cap.release()
+    out.release()
+    return dst if dst.exists() and dst.stat().st_size > 0 else None
+
+
+def prepare_playback(job_id):
+    job = JOBS.get(job_id)
+    if not job or job["kind"] != "video":
+        return
+    try:
+        cc = fourcc_of(job["path"])
+        if cc in BROWSER_CODECS:
+            job["playback"] = job["path"]
+        else:
+            job["transcoding"] = True
+            job["playback"] = make_playable(job_id, job["path"]) or job["path"]
+    except Exception:                       # a preview must never break the run
+        job["playback"] = job["path"]
+    finally:
+        job["transcoding"] = False
 
 
 @app.get("/api/media/{job_id}")
@@ -218,7 +331,21 @@ def media(job_id: str):
     job = JOBS.get(job_id)
     if not job:
         raise HTTPException(404, "Unknown job.")
-    return FileResponse(job["path"])
+    path = job.get("playback") or job["path"]
+    mt = "video/webm" if str(path).endswith(".webm") else None
+    return FileResponse(path, media_type=mt)
+
+
+@app.get("/api/media_status/{job_id}")
+def media_status(job_id: str):
+    """Whether a playable copy exists yet, so the UI can say so rather than
+    showing an empty player while a re-encode is still running."""
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Unknown job.")
+    return {"ready": job.get("playback") is not None,
+            "transcoding": bool(job.get("transcoding")),
+            "codec": job.get("codec", "")}
 
 
 @app.get("/api/stream/{job_id}")

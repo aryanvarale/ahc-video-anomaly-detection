@@ -1,157 +1,199 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SENTINEL · Aerial Anomaly Detection</title>
+<title>Anomaly Detection</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
-<div class="grid-bg"></div>
-<div class="glow glow-a"></div>
-<div class="glow glow-b"></div>
+<div class="mesh"><span class="orb o1"></span><span class="orb o2"></span><span class="orb o3"></span></div>
 
-<header class="topbar">
-  <div class="brand">
-    <div class="brand-mark">
-      <svg viewBox="0 0 32 32" aria-hidden="true">
-        <path d="M16 3 L27 9.5 L27 22.5 L16 29 L5 22.5 L5 9.5 Z" fill="none" stroke="currentColor" stroke-width="1.6"/>
-        <circle cx="16" cy="16" r="3.2" fill="currentColor"/>
-        <path d="M16 6.5 L16 12.8 M16 19.2 L16 25.5 M8 11.5 L13.2 14.4 M18.8 17.6 L24 20.5 M8 20.5 L13.2 17.6 M18.8 14.4 L24 11.5"
-              stroke="currentColor" stroke-width="1.1" opacity=".55"/>
-      </svg>
+<header class="bar glass">
+  <div class="bar-left">
+    <div id="statusPill" class="status">
+      <span class="dot"></span><span id="statusText">Checking</span>
     </div>
-    <div class="brand-text">
-      <h1>SENTINEL</h1>
-      <span>Aerial Anomaly Detection</span>
+    <div class="meta-chip mono" title="Active model">
+      <span id="modelName">—</span>
     </div>
   </div>
 
-  <div class="topbar-meta">
-    <div class="stat-inline">
-      <label>Model</label>
-      <span id="modelName" class="mono">qwen3-vl-4b</span>
-    </div>
-    <div class="stat-inline">
-      <label>Classes</label>
-      <span class="mono">12</span>
-    </div>
-    <div id="statusPill" class="pill pill-idle">
-      <span class="dot"></span><span id="statusText">CHECKING</span>
-    </div>
+  <div class="bar-right">
+    <div class="meta-chip mono"><span id="classCount">12</span>&nbsp;classes</div>
+    <button id="themeBtn" class="icon-only" title="Toggle theme" aria-label="Toggle theme">
+      <svg id="iconMoon" viewBox="0 0 20 20"><path d="M16 11.5A6.5 6.5 0 0 1 8.5 4a6.5 6.5 0 1 0 7.5 7.5z" fill="currentColor"/></svg>
+      <svg id="iconSun" viewBox="0 0 20 20" class="hidden">
+        <circle cx="10" cy="10" r="3.6" fill="currentColor"/>
+        <path d="M10 2.4v2M10 15.6v2M2.4 10h2M15.6 10h2M4.6 4.6l1.4 1.4M14 14l1.4 1.4M15.4 4.6L14 6M6 14l-1.4 1.4"
+              stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+    </button>
   </div>
 </header>
 
 <main class="layout">
 
-  <!-- ── left: viewport ───────────────────────────────────────────────── -->
-  <section class="panel viewport-panel">
-    <div class="panel-head">
-      <h2>Live Feed</h2>
-      <div class="head-right">
-        <span id="sourceName" class="mono muted">no source</span>
+  <section class="col-main">
+    <div class="card glass feed">
+      <div class="card-head">
+        <div class="head-l">
+          <h2>Analysis</h2>
+          <span id="sourceName" class="sub">No source selected</span>
+        </div>
+        <button id="backBtn" class="btn-sm hidden">
+          <svg viewBox="0 0 20 20"><path d="M12.5 15 7.5 10l5-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Back
+        </button>
       </div>
-    </div>
 
-    <div id="stage" class="stage">
-      <!-- drop zone -->
-      <div id="dropzone" class="dropzone">
-        <input type="file" id="fileInput" accept="video/*,image/*" hidden>
-        <div class="dz-inner">
-          <div class="dz-icon">
-            <svg viewBox="0 0 48 48" aria-hidden="true">
-              <path d="M24 32V10M24 10l-7.5 7.5M24 10l7.5 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M8 30v5a3 3 0 0 0 3 3h26a3 3 0 0 0 3-3v-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-            </svg>
+      <div id="stage" class="stage">
+        <div id="dropzone" class="dropzone">
+          <input type="file" id="fileInput" accept="video/*,image/*" hidden>
+          <div class="dz">
+            <div class="dz-icon">
+              <svg viewBox="0 0 44 44"><path d="M22 29V11m0 0-6.5 6.5M22 11l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 28v4.5A3.5 3.5 0 0 0 11.5 36h21a3.5 3.5 0 0 0 3.5-3.5V28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </div>
+            <h3>Drop footage to analyse</h3>
+            <p>Drone, CCTV or dashcam — video or still image</p>
+            <button type="button" class="btn" id="browseBtn">Choose file</button>
+            <span class="dz-note mono">MP4 · MOV · AVI · JPG · PNG — up to 500 MB</span>
           </div>
-          <h3>Drop footage to analyse</h3>
-          <p>Drone · CCTV · Dashcam &nbsp;—&nbsp; video or still image</p>
-          <button type="button" class="btn btn-primary" id="browseBtn">Select file</button>
-          <div class="dz-hint mono">MP4 · MOV · AVI · JPG · PNG &nbsp;·&nbsp; max 500 MB</div>
+        </div>
+
+        <div id="viewer" class="viewer hidden">
+          <video id="video" class="media" playsinline muted></video>
+          <img id="image" class="media hidden" alt="uploaded frame">
+
+          <div id="liveBadge" class="live glass hidden"><span class="pulse"></span>Analysing</div>
+
+          <div id="prepNotice" class="prep glass hidden">
+            <span class="pulse"></span><span id="prepText">Preparing playback</span>
+          </div>
+
+          <!-- Live readout pinned to the clock: what is being reported at this
+               instant, and - when the clip is one of the labelled ones - how
+               well that overlaps the truth, which is the gate events are
+               actually scored on. -->
+          <div id="hud" class="hud glass hidden">
+            <div class="hud-row">
+              <span id="hudDot" class="hud-dot"></span>
+              <span id="hudClass" class="hud-class">Normal</span>
+              <span id="hudConf" class="mono hud-conf"></span>
+            </div>
+            <div id="hudIouRow" class="hud-iou hidden">
+              <span class="hud-iou-k">IoU vs truth</span>
+              <span id="hudIou" class="mono hud-iou-v">—</span>
+              <span id="hudIouGate" class="hud-gate">needs ≥ 0.50</span>
+            </div>
+            <div id="hudGtRow" class="hud-gt hidden">
+              <span class="hud-iou-k">Labelled</span>
+              <span id="hudGt" class="mono">—</span>
+            </div>
+          </div>
+
+          <div id="verdictOverlay" class="verdict glass hidden">
+            <div class="v-l"><span id="verdictLabel"></span></div>
+            <span id="verdictConf" class="mono"></span>
+          </div>
+
+          <div id="controls" class="controls glass hidden">
+            <button id="playBtn" class="icon-only" title="Play / pause (Space)">
+              <svg id="iconPlay" viewBox="0 0 20 20"><path d="M6.5 4.5 15 10l-8.5 5.5v-11z" fill="currentColor"/></svg>
+              <svg id="iconPause" viewBox="0 0 20 20" class="hidden"><rect x="5.5" y="4.5" width="3.4" height="11" rx="1.2" fill="currentColor"/><rect x="11.1" y="4.5" width="3.4" height="11" rx="1.2" fill="currentColor"/></svg>
+            </button>
+            <span id="curTime" class="mono t">0:00</span>
+            <div id="seek" class="seek"><div id="seekFill" class="seek-fill"></div></div>
+            <span id="totTime" class="mono t dim">0:00</span>
+            <button id="muteBtn" class="icon-only" title="Mute / unmute">
+              <svg id="iconMuted" viewBox="0 0 20 20"><path d="M4 8h3l4-3v10l-4-3H4V8z" fill="currentColor"/><path d="M14 8l3 4M17 8l-3 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              <svg id="iconSound" viewBox="0 0 20 20" class="hidden"><path d="M4 8h3l4-3v10l-4-3H4V8z" fill="currentColor"/><path d="M13.5 7.5a3.5 3.5 0 0 1 0 5M15.5 5.5a6 6 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            </button>
+            <button id="panelBtn" class="icon-only" title="Show / hide panels (P)">
+              <svg id="iconPanelOn" viewBox="0 0 20 20"><rect x="2.5" y="4" width="15" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12.5 4v12" stroke="currentColor" stroke-width="1.6"/></svg>
+              <svg id="iconPanelOff" viewBox="0 0 20 20" class="hidden"><rect x="2.5" y="4" width="15" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".5"/><path d="M4 16 16 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            </button>
+            <button id="fsBtn" class="icon-only" title="Fullscreen (F)">
+              <svg id="iconFsIn" viewBox="0 0 20 20"><path d="M7.5 3H3v4.5M12.5 3H17v4.5M17 12.5V17h-4.5M3 12.5V17h4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <svg id="iconFsOut" viewBox="0 0 20 20" class="hidden"><path d="M3 7.5h4.5V3M17 7.5h-4.5V3M17 12.5h-4.5V17M3 12.5h4.5V17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+
+          <div id="fsOverlay" class="fs-overlay"></div>
         </div>
       </div>
 
-      <!-- media + scan overlay -->
-      <div id="viewer" class="viewer hidden">
-        <video id="video" class="media" playsinline muted></video>
-        <img id="image" class="media hidden" alt="uploaded frame">
-        <div id="scanline" class="scanline hidden"></div>
-        <div class="reticle">
-          <span class="corner tl"></span><span class="corner tr"></span>
-          <span class="corner bl"></span><span class="corner br"></span>
+      <div class="track-area">
+        <div class="track-head">
+          <span class="lbl">Anomaly signal</span>
+          <span id="timeLabel" class="mono dim">0.0s</span>
         </div>
-        <div id="liveBadge" class="live-badge hidden"><span class="dot"></span>ANALYSING</div>
-        <div id="verdictOverlay" class="verdict-overlay hidden">
-          <span id="verdictLabel"></span>
-          <span id="verdictConf" class="mono"></span>
+        <div id="timeline" class="track">
+          <canvas id="heatCanvas"></canvas>
+          <div id="eventBands" class="bands"></div>
+          <div id="iouBands" class="bands"></div>
+          <div id="playhead" class="ph"></div>
         </div>
+
+        <!-- Only shown for the labelled videos. Two aligned rows - what was
+             detected, what the truth says - so the overlap the score is
+             computed from is a shape on screen, not a number to take on
+             trust. The gate itself (IoU >= 0.5) is drawn as a vertical
+             threshold marker on the meter beside it. -->
+        <div id="gtTrackWrap" class="gt-wrap hidden">
+          <div class="track-head">
+            <span class="lbl">Ground truth</span>
+            <span id="gtSummary" class="mono dim"></span>
+          </div>
+          <div id="gtTrack" class="track gt-track">
+            <div id="gtBands" class="bands"></div>
+            <div id="gtPlayhead" class="ph"></div>
+          </div>
+        </div>
+        <div class="track-foot mono dim"><span>0:00</span><span id="durLabel">—</span></div>
       </div>
     </div>
 
-    <!-- timeline -->
-    <div class="timeline-wrap">
-      <div class="timeline-head">
-        <span class="mono muted">TIMELINE</span>
-        <span id="timeLabel" class="mono muted">0.0s</span>
+    <div class="card glass tele">
+      <div class="tele-grid">
+        <div class="t-cell"><span class="t-lbl">Progress</span><span id="tProgress" class="t-val">0<i>%</i></span></div>
+        <div class="t-cell"><span class="t-lbl">Chunks</span><span id="tChunks" class="t-val">0<i>/0</i></span></div>
+        <div class="t-cell"><span class="t-lbl">Latency p50</span><span id="tP50" class="t-val">—<i>ms</i></span></div>
+        <div class="t-cell"><span class="t-lbl">Latency p95</span><span id="tP95" class="t-val">—<i>ms</i></span></div>
+        <div class="t-cell"><span class="t-lbl">Realtime factor</span><span id="tRtf" class="t-val">—</span></div>
       </div>
-      <div id="timeline" class="timeline">
-        <canvas id="heatCanvas"></canvas>
-        <div id="eventBands" class="event-bands"></div>
-        <div id="playhead" class="playhead"></div>
-      </div>
-      <div class="timeline-scale mono muted">
-        <span>0:00</span><span id="durLabel">--:--</span>
-      </div>
+      <div class="prog"><div id="progressBar" class="prog-fill"></div></div>
     </div>
   </section>
 
-  <!-- ── right: detections + telemetry ────────────────────────────────── -->
-  <aside class="side">
-
-    <section class="panel detections-panel">
-      <div class="panel-head">
-        <h2>Detections</h2>
-        <span id="eventCount" class="chip mono">0</span>
+  <aside class="col-side">
+    <div class="card glass grow">
+      <div class="card-head">
+        <div class="head-l"><h2>Detections</h2><span id="eventCount" class="count">0</span></div>
       </div>
-      <div id="detectionList" class="detection-list">
-        <div class="empty-state">
-          <div class="empty-ring"></div>
-          <p>Awaiting footage</p>
-          <span class="mono muted">events will appear here as they are found</span>
+      <div id="detectionList" class="det-list">
+        <div class="empty">
+          <div class="empty-dot"></div>
+          <p>No footage analysed yet</p>
+          <span class="sub">Events appear here as they are found</span>
         </div>
       </div>
-    </section>
+    </div>
 
-    <section class="panel confidence-panel">
-      <div class="panel-head">
-        <h2>Class Confidence</h2>
-        <span class="mono muted" id="chunkPos">—</span>
+    <div class="card glass grow">
+      <div class="card-head">
+        <div class="head-l"><h2>Class confidence</h2><span id="chunkPos" class="sub">—</span></div>
       </div>
-      <div id="confBars" class="conf-bars"></div>
-    </section>
-
-    <section class="panel telemetry-panel">
-      <div class="panel-head"><h2>Telemetry</h2></div>
-      <div class="telemetry">
-        <div class="tel"><label>Chunks</label><span id="tChunks" class="mono">0<i>/0</i></span></div>
-        <div class="tel"><label>Latency p50</label><span id="tP50" class="mono">—<i>ms</i></span></div>
-        <div class="tel"><label>Latency p95</label><span id="tP95" class="mono">—<i>ms</i></span></div>
-        <div class="tel"><label>Realtime factor</label><span id="tRtf" class="mono">—</span></div>
-      </div>
-      <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
-      <div class="progress-meta mono muted"><span id="progressPct">0%</span><span id="progressEta"></span></div>
-    </section>
-
-    <button id="resetBtn" class="btn btn-ghost hidden">Analyse another file</button>
+      <div id="confBars" class="bars"></div>
+    </div>
   </aside>
 </main>
 
-<div id="toast" class="toast hidden"></div>
-
+<div id="toast" class="toast glass hidden"></div>
 <script src="/app.js"></script>
 </body>
 </html>
