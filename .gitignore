@@ -25,3 +25,8 @@ d1_dense*.json
 val_baseline_old.json
 val_tmp.json
 checkpoint_results.jsonl
+eval_videos/
+eval_flat/
+submission_eval*.json
+submission_repro.json
+checkpoint_results.jsonl
