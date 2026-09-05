@@ -49,10 +49,22 @@ CFG = {
     # undifferentiated block and event boundaries can't be cut from it (measured:
     # with T=1 every threshold setting scored identically - thresholds were inert).
     # Softening the distribution restores the dynamic range they act on.
-    "temperature": 2.5,      # 1.0 = off. Chosen mid-plateau (stable over 2.0-3.0)
+    # 3.0, not 2.5. Swept jointly with the hysteresis thresholds against TWO
+    # independent probability caches from the same model, because a single cache
+    # is not trustworthy here: run-to-run vLLM nondeterminism moves L3 by up to
+    # 0.14 on a set with only four level-3 videos. Of every config tried,
+    # T=3.0 with t_high 0.70 / t_low 0.25 was the only one scoring the same (49.2)
+    # on both caches; the previous 2.5 / 0.65 / 0.30 scored 45.7 and 49.2.
+    "temperature": 3.0,      # 1.0 = off. Chosen mid-plateau (stable over 2.0-3.0)
                              # rather than at the sharper single-point optimum.
-    "t_high": 0.65,          # open an event
-    "t_low": 0.30,           # close an event
+    # Swept jointly with temperature against two independent probability caches.
+    # t_low is the one that matters: this model's probabilities saturate, so a
+    # low close-threshold keeps one event alive instead of chopping it into
+    # fragments the scorer charges 0.1 each for. Of everything tried, this was the
+    # only setting that scored the same on both caches (49.2/49.2); the previous
+    # 0.65/0.30 at T=2.5 scored 45.7 and 49.2, i.e. never better, sometimes worse.
+    "t_high": 0.70,          # open an event
+    "t_low": 0.25,           # close an event
     "t_open_chunks": 2,      # consecutive chunks above t_high needed to open
     "t_video": 0.65,         # video-level gate: below this -> events: []
     # L1: p(anomaly) needed to leave "normal".
