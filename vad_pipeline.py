@@ -27,12 +27,13 @@ CFG = {
     "model": "vad-qwen3vl-4b",
 
     # chunking
-    # 2.0s windows everywhere because that is the geometry the LoRA was trained
-    # on; a 3.0s window at L3 asked the model about 1.5x more time than it ever
-    # saw in training. Measured on the held-out set: L3 0.079 -> 0.189, with 25%
-    # FEWER calls than the old 3.0s/1.5s, so latency improves as well.
-    "chunk_sec": {1: None, 2: 2.0, 3: 2.0},      # None at L1 = whole clip
-    "stride_sec": {1: None, 2: 1.0, 3: 2.0},
+    # Matching L3 to the 2.0s geometry the LoRA trains on looked like a clear win
+    # (L3 0.079 -> 0.189) but that baseline was a STALE CACHE. Re-measured against
+    # the shipped v4 configuration it is a regression - 3.0s scores 0.216, 2.0s
+    # scores 0.189 - so L3 stays at 3.0s. Worth retrying against a retrained model,
+    # but only with the baseline re-measured, not read off an old cache.
+    "chunk_sec": {1: None, 2: 2.0, 3: 3.0},      # None at L1 = whole clip
+    "stride_sec": {1: None, 2: 1.0, 3: 1.5},
     "frames_per_chunk": {1: 16, 2: 8, 3: 8},
     "long_side": 448,                             # frame resize, keeps tokens low
 
