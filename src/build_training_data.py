@@ -1,26 +1,19 @@
 """
-Build LoRA SFT data for the AHC VAD hackathon.
+Build LoRA SFT data (ms-swift messages+images JSONL).
 
-Two sources, one output format (ms-swift messages+images JSONL):
+Two sources:
+ 1. Labelled videos: folder name is the class (or BENCH_MAP maps a public
+    benchmark's label onto one of ours). Chunks cut directly, no model call.
+ 2. Unlabelled footage: auto-labelled by a local teacher VLM
+    (Qwen2.5-VL-7B-Instruct), kept only if two passes with reversed frame
+    order agree.
 
- 1. LABELLED benchmarks (UCF-Crime, XD-Violence, DoTA/DADA, Drone-Anomaly...):
-    map their annotations onto our 12 classes and cut chunks directly.
-    --> free, exact, do this FIRST.
+Then balanced: ~45% normal, anomaly classes optionally equalised via
+--anom_target (denser stride for scarce classes, round-robin over source
+videos so the cap buys variety, not just count).
 
- 2. UNLABELLED drone footage: auto-label 2s chunks with a larger LOCAL open
-    VLM (Qwen2.5-VL-7B-Instruct by default), run on-GPU with no API key and
-    no per-call cost. Allowed by the rules for training-data generation since
-    it never touches the runtime detector. Keeps only chunks where two
-    independent passes with different frame orderings agree.
-
-Then it BALANCES the set so ~45% of samples are `normal`, drawn preferentially
-from hard negatives. False alarms are the single most expensive failure mode in
-the scoring, so the normal class must be well represented.
-
-Output line:
-{"messages":[{"role":"user","content":"<image>...<image>\n<PROMPT>"},
-             {"role":"assistant","content":"C"}],
- "images":["/abs/f0.jpg", ...]}
+Usage: python -m src.build_training_data --labelled 'train/*/videos/*.mp4' \
+    --out sft.jsonl --anom_target 650
 """
 
 import argparse, glob, json, os, random, re
@@ -29,7 +22,7 @@ from collections import Counter
 import cv2
 import torch
 
-from vad_pipeline import CLASSES, LETTERS, PROMPT, probe
+from src.pipeline import CLASSES, LETTERS, PROMPT, probe
 
 C2L = dict(zip(CLASSES, LETTERS))
 TEACHER_MODEL_PATH = os.environ.get("TEACHER_MODEL", "Qwen/Qwen2.5-VL-7B-Instruct")
@@ -38,7 +31,6 @@ _teacher, _processor = None, None
 
 
 def _load_teacher():
-    """Lazily load the local teacher VLM once, kept resident for the run."""
     global _teacher, _processor
     if _teacher is None:
         from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
@@ -49,7 +41,7 @@ def _load_teacher():
         _processor = AutoProcessor.from_pretrained(TEACHER_MODEL_PATH)
     return _teacher, _processor
 
-# map public-benchmark labels -> our 12 classes. Extend as you inspect the data.
+
 BENCH_MAP = {
     "RoadAccidents": "traffic_accident", "Accident": "traffic_accident",
     "Fighting": "fighting_or_violence", "Assault": "fighting_or_violence",
@@ -80,7 +72,6 @@ def cut_chunks(path, chunk_sec=2.0, stride=2.0, k=8, long_side=448, outdir="chun
         if i == need[ptr]:
             ok, fr = cap.retrieve()
             if ok:
-                # resize IMMEDIATELY - buffering full-res frames blows up host RAM
                 h, w = fr.shape[:2]
                 s = long_side / max(h, w)
                 if s < 1.0:
@@ -125,15 +116,12 @@ def ask_teacher(paths):
 def label_one(item):
     _, _, paths = item
     a = ask_teacher(paths)
-    b = ask_teacher(list(reversed(paths)))      # cheap self-consistency check
+    b = ask_teacher(list(reversed(paths)))
     return a if (a and a == b) else None
 
 
 def resolve_class(path):
-    """Class from directory layout. Handles both
-    '<class_name>/videos/x.mp4' (this hackathon's own dataset, folder name
-    IS the class) and generic benchmark layouts like 'UCF/<ClassName>/x.mp4'
-    (mapped via BENCH_MAP)."""
+    """'<class>/videos/x.mp4' -> class directly; else BENCH_MAP lookup."""
     parent = os.path.basename(os.path.dirname(path))
     if parent.lower() == "videos":
         parent = os.path.basename(os.path.dirname(os.path.dirname(path)))
@@ -146,26 +134,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--unlabelled", default="", help="glob of drone/CCTV videos")
     ap.add_argument("--labelled", default=[], action="append",
-                     help="glob like 'Train and Test/train/*/videos/*.mp4' or 'UCF/*/*.mp4'; "
-                          "pass multiple times to combine several sources into one balanced set")
+                     help="glob, e.g. 'train/*/videos/*.mp4'; repeatable")
     ap.add_argument("--chunkdir", default="chunks")
     ap.add_argument("--out", default="sft.jsonl")
     ap.add_argument("--max_per_video", type=int, default=12)
-    ap.add_argument("--max_videos_per_class", type=int, default=100,
-                     help="cap source videos per class before chunk-cutting, so a "
-                          "class with 10x more raw videos doesn't dominate decode time")
+    ap.add_argument("--max_videos_per_class", type=int, default=100)
     ap.add_argument("--normal_share", type=float, default=0.45)
     ap.add_argument("--anom_target", type=int, default=0,
-                     help="chunks to aim for per ANOMALY class (0 = keep natural counts). "
-                          "The natural counts are ~8:1 between the commonest and rarest "
-                          "anomaly, which trains the model to fall back on the frequent "
-                          "class whenever it is unsure - the observed "
-                          "fighting->loitering and *->traffic_accident errors.")
+                     help="chunks per anomaly class (0 = natural counts)")
     a = ap.parse_args()
 
     rows = []
 
-    # ---- source 1: labelled benchmarks (no teacher calls needed) ----
     by_class_paths = {}
     for pattern in a.labelled:
         for path in glob.glob(pattern):
@@ -178,11 +158,6 @@ def main():
         random.shuffle(paths)
         capped = paths[: a.max_videos_per_class]
 
-        # How densely to sample each video. Rare classes have both the fewest
-        # videos AND the shortest ones, so at the default 2s stride they can
-        # never reach the target however many videos we use; overlapping the
-        # chunks is the only lever left. Common classes stay at stride 2.0 and
-        # get their diversity from using more distinct videos instead.
         stride, per_video = 2.0, a.max_per_video
         if a.anom_target and cls != "normal":
             need = a.anom_target / max(len(capped), 1)
@@ -198,10 +173,8 @@ def main():
             ch = cut_chunks(path, stride=stride, outdir=a.chunkdir)
             random.shuffle(ch)
             for _, _, chpaths in ch[:per_video]:
-                # keep the source video so balancing can spread across videos
                 rows.append((C2L[cls], chpaths, path))
 
-    # ---- source 2: unlabelled footage, distilled from a large VLM ----
     todo = []
     for path in glob.glob(a.unlabelled):
         ch = cut_chunks(path, outdir=a.chunkdir)
@@ -209,7 +182,7 @@ def main():
         todo += [(c, path) for c in ch[: a.max_per_video]]
     print(f"[teacher] labelling {len(todo)} chunks with local {TEACHER_MODEL_PATH}")
     if todo:
-        _load_teacher()  # load once, up front, before the loop
+        _load_teacher()
         for i, (item, src) in enumerate(todo, 1):
             lab = label_one(item)
             if lab:
@@ -217,22 +190,12 @@ def main():
             if i % 50 == 0:
                 print(f"  {i}/{len(todo)}")
 
-    # ---- balance ----
-    # normal_share is a target, not just a normal-side cap: if there isn't enough
-    # normal supply to hit it against the full anomaly pool (false alarms are the
-    # costliest failure mode, so under-shooting this silently is dangerous),
-    # downsample the anomaly side proportionally instead of quietly accepting a
-    # lower normal share.
     by = {}
     by_src = {}
     for lab, paths, src in rows:
         by.setdefault(lab, []).append(paths)
         by_src.setdefault(lab, {}).setdefault(src, []).append(paths)
 
-    # ---- equalise the anomaly classes ----
-    # Take the target round-robin over source videos rather than at random:
-    # drawing 650 chunks uniformly from a class whose chunks are concentrated in
-    # a few long videos would buy count without buying variety.
     if a.anom_target:
         for k in list(by):
             if k == "A":

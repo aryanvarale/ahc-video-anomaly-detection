@@ -1,16 +1,13 @@
 """
-AHC Video Anomaly Detection - inference + submission pipeline.
+Video anomaly detection - inference + submission pipeline.
 
-Design:
-  Qwen3-VL-4B-Instruct (LoRA fine-tuned, merged) served by vLLM.
-  Each video is cut into overlapping chunks of N frames. The model answers with
-  ONE letter (A-L). We read the top_logprobs of that single token to get a
-  calibrated probability over the 12 classes -> thresholding + hysteresis.
+Qwen3-VL-4B-Instruct (LoRA, merged) served by vLLM. Each video is cut into
+overlapping chunks; the model answers with one letter (A-L), and top_logprobs
+gives a calibrated probability over the 12 classes for thresholding/hysteresis.
 
 Usage:
-  # 1. start server (see README section in the plan)
-  # 2. python vad_pipeline.py --manifest manifest.json --videos ./videos \
-  #        --template starter_template.json --out submission.json
+  python -m src.pipeline --manifest examples/manifest.json --videos ./videos \
+      --out submission.json
 """
 
 import argparse, base64, json, math, os, statistics, time
@@ -19,85 +16,35 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 import requests
 
-# --------------------------------------------------------------------------- #
-# config - THIS IS WHAT YOU TUNE. Everything else can stay as is.
-# --------------------------------------------------------------------------- #
 CFG = {
     "server": os.environ.get("VAD_SERVER", "http://127.0.0.1:28451/v1/chat/completions"),
     "model": "vad-qwen3vl-4b",
 
-    # chunking
-    # Matching L3 to the 2.0s geometry the LoRA trains on looked like a clear win
-    # (L3 0.079 -> 0.189) but that baseline was a STALE CACHE. Re-measured against
-    # the shipped v4 configuration it is a regression - 3.0s scores 0.216, 2.0s
-    # scores 0.189 - so L3 stays at 3.0s. Worth retrying against a retrained model,
-    # but only with the baseline re-measured, not read off an old cache.
-    # Level 1 chunks densely (2s/1s) rather than taking one whole-clip pass. A
-    # single pass has to compress a 26s clip into 16 frames, and a brief anomaly
-    # gets averaged away; 2s windows also match the geometry the LoRA trained on.
-    # Measured on the held-out set, this took level 1 from 5/20 to 12/20 correct,
-    # and it is the configuration the shipped submission was built with - so it
-    # is the default here, or running this file would not reproduce that score.
+    # chunking: dense at L1/L2 (2s/1s), wider at L3 (3s/1.5s)
     "chunk_sec": {1: 2.0, 2: 2.0, 3: 3.0},
     "stride_sec": {1: 1.0, 2: 1.0, 3: 1.5},
     "frames_per_chunk": {1: 8, 2: 8, 3: 8},
-    "long_side": 448,                             # frame resize, keeps tokens low
+    "long_side": 448,
 
-    # decision thresholds (tune on your val split - biggest score lever)
-    # Training to ~100% token accuracy leaves the model overconfident: its
-    # per-chunk probabilities saturate at 0/1, so long stretches read as one
-    # undifferentiated block and event boundaries can't be cut from it (measured:
-    # with T=1 every threshold setting scored identically - thresholds were inert).
-    # Softening the distribution restores the dynamic range they act on.
-    # 3.0, not 2.5. Swept jointly with the hysteresis thresholds against TWO
-    # independent probability caches from the same model, because a single cache
-    # is not trustworthy here: run-to-run vLLM nondeterminism moves L3 by up to
-    # 0.14 on a set with only four level-3 videos. Of every config tried,
-    # T=3.0 with t_high 0.70 / t_low 0.25 was the only one scoring the same (49.2)
-    # on both caches; the previous 2.5 / 0.65 / 0.30 scored 45.7 and 49.2.
-    "temperature": 3.0,      # 1.0 = off. Chosen mid-plateau (stable over 2.0-3.0)
-                             # rather than at the sharper single-point optimum.
-    # Swept jointly with temperature against two independent probability caches.
-    # t_low is the one that matters: this model's probabilities saturate, so a
-    # low close-threshold keeps one event alive instead of chopping it into
-    # fragments the scorer charges 0.1 each for. Of everything tried, this was the
-    # only setting that scored the same on both caches (49.2/49.2); the previous
-    # 0.65/0.30 at T=2.5 scored 45.7 and 49.2, i.e. never better, sometimes worse.
+    # thresholds, swept against held-out data (see docs/plan.txt)
+    "temperature": 3.0,      # p^(1/T) softening; 1.0 = off
     "t_high": 0.70,          # open an event
     "t_low": 0.25,           # close an event
     "t_open_chunks": 2,      # consecutive chunks above t_high needed to open
     "t_video": 0.65,         # video-level gate: below this -> events: []
-    # L1: p(anomaly) needed to leave "normal".
-    # Swept on the held-out level-1 videos: 0.15-0.40 all score 0.708, 0.45-0.50
-    # score 0.750, 0.60 drops to 0.729. The step at 0.45 is T003, a normal video
-    # sitting at p_anom 0.42 - below 0.45 it becomes a false alarm, which at level
-    # 1 costs BOTH halves of the score (anomaly-vs-normal and class). 0.50 is the
-    # middle of the good plateau rather than its edge.
-    "t_level1": 0.50,
+    "t_level1": 0.50,        # L1: p(anomaly) needed to leave "normal"
     "merge_gap_sec": 2.0,    # same-class runs closer than this are merged
     "max_events": 4,         # fragmentation guard
 
-    # --- stage 2: tiled verification (off by default) ------------------------
-    # The always-on pass sees the whole frame downscaled to `long_side`, so an
-    # anomaly occupying a small corner of a wide aerial shot can collapse into a
-    # couple of patches and vanish. This second stage re-reads those frames at
-    # full resolution, splits them into a grid, and classifies each tile, giving
-    # a small region grid^2 times the pixel density it had in the full frame.
-    # It only fires on a minority of chunks, so the real-time budget holds.
+    # stage 2: tiled verification for small/off-center anomalies (off by default)
     "verify_enabled": False,
-    "verify_band": (0.20, 0.80),   # first-pass p(anomaly) in this band -> uncertain, verify
-    "verify_every_n": 6,           # ALSO verify every Nth chunk regardless of confidence:
-                                   # a small anomaly the low-res pass confidently calls
-                                   # "normal" never lands in the uncertain band, and the
-                                   # classes most likely to be small (debris, loitering,
-                                   # stalled vehicle) are also the most persistent, so
-                                   # periodic sampling has a good chance of catching them.
-    "verify_grid": 2,              # 2x2 tiling
-    "verify_max_calls": 60,        # hard per-video cap on extra model calls
-    "verify_tile_min_conf": 0.90,  # tiles are out-of-distribution vs the full-frame
-                                   # training data, so demand high confidence before a
-                                   # tile is allowed to override the full-frame verdict
-    "min_dur_sec": {         # per-class minimum plausible duration
+    "verify_band": (0.20, 0.80),
+    "verify_every_n": 6,
+    "verify_grid": 2,
+    "verify_max_calls": 60,
+    "verify_tile_min_conf": 0.90,
+
+    "min_dur_sec": {
         "traffic_accident": 1.0,
         "traffic_congestion": 4.0,
         "stalled_or_broken_down_vehicle": 6.0,
@@ -110,7 +57,7 @@ CFG = {
         "fighting_or_violence": 2.0,
         "loitering_or_suspicious_presence": 5.0,
     },
-    "concurrency": 16,       # parallel requests to vLLM
+    "concurrency": 16,
 }
 
 LETTERS = "ABCDEFGHIJKL"
@@ -148,6 +95,7 @@ PROMPT = (
     "Be strict: if it is ordinary activity, answer A. Answer with exactly one letter."
 )
 
+
 # --------------------------------------------------------------------------- #
 # frame extraction
 # --------------------------------------------------------------------------- #
@@ -169,22 +117,18 @@ def encode(frame, long_side):
 
 
 def read_chunks(path, level):
-    """Yield (start_sec, end_sec, [b64 jpeg, ...])."""
+    """Return [(start_sec, end_sec, [b64 jpeg, ...])] for one video."""
     fps, nframes, dur = probe(path)
     chunk_sec, stride = CFG["chunk_sec"][level], CFG["stride_sec"][level]
     k = CFG["frames_per_chunk"][level]
 
-    if chunk_sec is None:                      # Level 1: one pass over the clip
+    windows, t = [], 0.0
+    while t < max(dur - 0.5, 0.1):
+        windows.append((t, min(t + chunk_sec, dur)))
+        t += stride
+    if not windows:
         windows = [(0.0, max(dur, 0.1))]
-    else:
-        windows, t = [], 0.0
-        while t < max(dur - 0.5, 0.1):
-            windows.append((t, min(t + chunk_sec, dur)))
-            t += stride
-        if not windows:
-            windows = [(0.0, max(dur, 0.1))]
 
-    # single sequential decode pass, collecting every frame index we need
     need = {}
     for wi, (a, b) in enumerate(windows):
         for j in range(k):
@@ -222,12 +166,7 @@ def read_chunks(path, level):
 # stage 2: tiled verification
 # --------------------------------------------------------------------------- #
 def read_frames_raw(path, start_sec, end_sec, k):
-    """Re-read this chunk's k frames at FULL resolution.
-
-    read_chunks() throws the raw frames away (it encodes straight to downscaled
-    jpeg) and holding them all would cost gigabytes on a long clip, so the
-    verification stage pays a second seek+decode for the chunks it actually
-    looks at."""
+    """Re-read this chunk's k frames at full resolution for tiling."""
     cap = cv2.VideoCapture(path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     nframes = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
@@ -244,8 +183,7 @@ def read_frames_raw(path, start_sec, end_sec, k):
 
 
 def tile_frame(frame, grid):
-    """Split into grid x grid tiles -> [((row, col), tile), ...].
-    The last row/column absorbs any remainder so no pixels are dropped."""
+    """Split into grid x grid tiles -> [((row, col), tile), ...]."""
     h, w = frame.shape[:2]
     th, tw = h // grid, w // grid
     if th < 1 or tw < 1:
@@ -261,14 +199,8 @@ def tile_frame(frame, grid):
 
 
 def verify_chunk(path, start_sec, end_sec, k, classify_fn=None):
-    """Classify each tile position of this chunk separately.
-
-    Tiles are grouped BY POSITION across the chunk's frames, so every model call
-    still sees a short temporal sequence of one region rather than a single
-    still - that keeps the input shaped like what the model was trained on.
-
-    Returns (best_probs, call_times_ms). best_probs is the tile distribution
-    with the strongest anomaly signal, or None if nothing could be read."""
+    """Classify each tile position across this chunk's frames; return the
+    tile with the strongest anomaly signal, or None."""
     classify_fn = classify_fn or classify
     frames = read_frames_raw(path, start_sec, end_sec, k)
     if not frames:
@@ -302,13 +234,8 @@ def wants_verify(p_anom, chunk_idx):
 
 
 def apply_verification(path, chunks, probs, level):
-    """Run stage 2 over the chunks that warrant it and fold the results in.
-
-    Returns (probs, extra_call_times_ms). probs is modified in place-ish (a new
-    list is returned) - a tile only overrides the full-frame verdict when it is
-    both more anomalous AND above verify_tile_min_conf, because a cropped tile is
-    out-of-distribution relative to the full-frame chunks the model was tuned on
-    and its confidence is correspondingly less trustworthy."""
+    """Run stage 2 over chunks that warrant it; a tile only overrides the
+    full-frame verdict if it's both more anomalous and above verify_tile_min_conf."""
     k = CFG["frames_per_chunk"][level]
     out = list(probs)
     extra_times, budget = [], CFG["verify_max_calls"]
@@ -409,10 +336,8 @@ def aggregate(chunks, probs):
             continue
         cls = max(agg, key=agg.get)
         s, e = chunks[a][0], chunks[b][1]
-        events.append([cls, round(s, 2), round(e, 2),
-                       max(anom[a: b + 1])])
+        events.append([cls, round(s, 2), round(e, 2), max(anom[a: b + 1])])
 
-    # merge same-class neighbours to avoid fragmentation penalty
     events.sort(key=lambda x: x[1])
     merged = []
     for ev in events:
@@ -422,8 +347,7 @@ def aggregate(chunks, probs):
         else:
             merged.append(list(ev))
 
-    out = [e for e in merged
-           if e[2] - e[1] >= CFG["min_dur_sec"].get(e[0], 1.0)]
+    out = [e for e in merged if e[2] - e[1] >= CFG["min_dur_sec"].get(e[0], 1.0)]
     out.sort(key=lambda x: -x[3])
     return sorted(out[: CFG["max_events"]], key=lambda x: x[1])
 
@@ -447,11 +371,7 @@ EXPL = {
 # per-video driver
 # --------------------------------------------------------------------------- #
 def apply_temperature(probs, T=None):
-    """Soften a saturated class distribution: p^(1/T), renormalised.
-
-    T > 1 flattens. Applied to the already-normalised probabilities rather than
-    the raw logits, which is equivalent up to the constant that normalising
-    removes anyway."""
+    """Soften a saturated class distribution: p^(1/T), renormalised."""
     T = CFG["temperature"] if T is None else T
     if not T or T == 1.0:
         return probs
@@ -485,9 +405,7 @@ def do_video(vid, path, level, pool):
 
     if CFG["verify_enabled"] and chunks:
         calls, extra_times = apply_verification(path, chunks, calls, level)
-        call_times += extra_times   # verification is real work; it must show up
-                                    # in call_count/total_time_ms, since the
-                                    # latency bonus is computed from what we report
+        call_times += extra_times
     call_times.sort()
 
     if level == 1:
@@ -604,7 +522,7 @@ def main():
         "model_name": "qwen3vl4b-lora-chunked",
         "run_metadata": {
             "total_wall_time_ms": round((time.perf_counter() - t0) * 1000, 1),
-            "max_parallel_videos": 1,   # videos run sequentially; chunks within a video are parallelised
+            "max_parallel_videos": 1,
             "hardware": os.environ.get("VAD_HW", "1x RTX 4090"),
         },
         "predictions": preds,

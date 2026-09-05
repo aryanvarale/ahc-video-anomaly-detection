@@ -28,7 +28,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import vad_pipeline as vp  # noqa: E402
+from src import pipeline as vp  # noqa: E402
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC = APP_DIR / "static"

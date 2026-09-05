@@ -1,32 +1,38 @@
-qwen3vl4b/
+# data / model weights / experiment output — never committed
 data/
 data_mirrors/
+qwen3vl4b/
 out/
-out_dryrun/
+out*/
 chunks/
-chunks_dryrun/
-*.log
-__pycache__/
-*.pyc
-chunk_cache.json
-eval/
-sft.jsonl
-chunk_cache*.json
-out2/
-out3/
-cache_*.json
-eval_vllm.log
-best_checkpoint_preds.json
-chunks2/
-out4/
-sft_bal*.jsonl
-motion.json
-d1_dense*.json
-val_baseline_old.json
-val_tmp.json
-checkpoint_results.jsonl
+chunks*/
 eval_videos/
 eval_flat/
-submission_eval*.json
-submission_repro.json
-checkpoint_results.jsonl
+model/adapter_model.safetensors
+model/*.pt
+model/*.pth
+
+# archived exploratory scripts, old submissions, cached probabilities
+# (kept on disk, not tracked)
+experiments/
+best_checkpoint_preds.json
+d1_dense*.json
+motion.json
+eval/
+
+# run artifacts
+*.log
+*.jsonl
+submission*.json
+!examples/submission_template.json
+cache_*.json
+chunk_cache*.json
+val_*.json
+
+# python
+__pycache__/
+*.pyc
+
+# webapp runtime
+webapp/uploads/
+webapp/__pycache__/

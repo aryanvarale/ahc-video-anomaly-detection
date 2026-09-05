@@ -1,0 +1,9 @@
+transformers>=4.57
+qwen_vl_utils>=0.0.14
+ms-swift>=4.0
+vllm>=0.11.0
+opencv-python
+torch
+requests
+fastapi
+uvicorn

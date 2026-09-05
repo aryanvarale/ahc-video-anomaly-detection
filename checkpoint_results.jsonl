@@ -1,2 +1,0 @@
-{"submission": "submission_ft_v7_oldmodel.json", "checkpoint": "shots-oldmodel", "L1": 0.7083, "class_acc": 0.5417, "L2": 0.643, "L3": 0.1545, "precision": 0.4474, "recall": 0.3696, "f1": 0.4048, "est_marks": 46.4, "t_seg": 0.5}
-{"submission": "submission_ft_v6_330.json", "checkpoint": "rebalanced-330", "L1": 0.7083, "anomaly_acc": 0.875, "class_acc": 0.5417, "L2": 0.6186, "L3": 0.05, "est_marks": 41.4, "precision": 0.4103, "recall": 0.3478, "f1": 0.3765, "tp": 16, "fp": 23, "fn": 30}
